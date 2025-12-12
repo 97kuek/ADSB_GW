@@ -10,11 +10,11 @@
 
 | 氏名 | 役割 | GitHubアカウント |
 | :--- | :--- | :-------------------- |
-| 氏名1 | 代表者, 担当名 | [@your_github_username] |
-| 氏名2 | 担当名 | [@your_github_username] |
-| 氏名3 | 担当名 | [@your_github_username] |
-| 氏名4 | 担当名 | [@your_github_username] |
-| 氏名5 | 担当名 | [@your_github_username] |
+| 岡村圭吾 | 代表者, 担当名 | [@your_github_username] |
+| 伊藤悟 | 担当名 | [@your_github_username] |
+| 井上大阿 | 担当名 | [@your_github_username] |
+| 植木敬太郎| 担当名 | [@97kuek] |
+| 保科智哉 | 担当名 | [@your_github_username] |
 
 ## ディレクトリ構成
 
