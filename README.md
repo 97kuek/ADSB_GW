@@ -48,17 +48,11 @@ gcc -O3 -o prep_group1 src/prep_group1.c
 gcc -O3 -o search_group1 src/search_group1.c
 ```
 ### 2. 索引の構築
-データベースファイル (database.txt) を読み込み、検索用のバイナリ索引 (index.bin) を生成します。
-
 ```bash
 ./prep_group1
 ```
-- 入力: database.txt (100万行の文字列) 
-- 出力: index.bin (独自フォーマットの索引ファイル)
 
 ### 3. 検索の実行
-生成された索引 (index.bin) を利用して、クエリ (query.txt) に対する検索を行います。
-
 ```bash
 ./search_group1
 ```
