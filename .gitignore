@@ -1,55 +1,25 @@
-# Prerequisites
-*.d
-
-# Object files
+# ビルド生成物 (Build Artifacts)
 *.o
-*.ko
 *.obj
-*.elf
+*.bin
+# 実行ファイル (prep_group0, search_group1 などに対応)
+prep_group*
+search_group*
+a.out
 
-# Linker output
-*.ilk
-*.map
-*.exp
+# 実行ファイル置き場 (もし使用する場合)
+bin/
 
-# Precompiled Headers
-*.gch
-*.pch
+# テスト用データ (db_1, query_1 など)
+test/test_data/
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
+# VS Codeの設定フォルダ
+.vscode/
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+# Mac/Linuxのシステムファイル
+.DS_Store
+Thumbs.db
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
-*.dwo
+# 一時ファイル・バックアップ
+*.swp
+*~
