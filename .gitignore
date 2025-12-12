@@ -1,25 +1,11 @@
-# ビルド生成物 (Build Artifacts)
+.DS_Store
+Thumbs.db
+.vscode/
+*.out
+*.exe
+*.swp
+*~
+data/
 *.o
 *.obj
 *.bin
-# 実行ファイル (prep_group0, search_group1 などに対応)
-prep_group*
-search_group*
-a.out
-
-# 実行ファイル置き場 (もし使用する場合)
-bin/
-
-# テスト用データ (db_1, query_1 など)
-test/test_data/
-
-# VS Codeの設定フォルダ
-.vscode/
-
-# Mac/Linuxのシステムファイル
-.DS_Store
-Thumbs.db
-
-# 一時ファイル・バックアップ
-*.swp
-*~
