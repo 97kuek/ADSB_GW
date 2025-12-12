@@ -51,7 +51,6 @@ gcc -O3 -o search_group1 src/search_group1.c
 データベースファイル (database.txt) を読み込み、検索用のバイナリ索引 (index.bin) を生成します。
 
 ```bash
-# database がカレントディレクトリにある場合
 ./prep_group1
 ```
 - 入力: database.txt (100万行の文字列) 
@@ -61,7 +60,6 @@ gcc -O3 -o search_group1 src/search_group1.c
 生成された索引 (index.bin) を利用して、クエリ (query.txt) に対する検索を行います。
 
 ```bash
-# query がカレントディレクトリにある場合
 ./search_group1
 ```
 
@@ -69,6 +67,33 @@ gcc -O3 -o search_group1 src/search_group1.c
 - メモリ制限: 使用メモリの上限は 5GB です。
 - 構築時間: 索引構築 (prep) に使える時間は最大 4分 です。
 - 検索時間: 検索処理 (search) に使える時間は最大 1分 です。
+
+## Gitの使用方法
+### 開発を始めるとき(最初だけ)
+```Bash
+git clone [リポジトリURL]
+cd [フォルダ名]
+git checkout -b [自分の名前]  # 自分用ブランチを作る
+```
+### 毎回の作業フロー
+```Bash
+# 変更を保存して自分のブランチに送る
+git add .
+git commit -m "変更内容メッセージ"
+git push origin [自分の名前]
+```
+### 他の人のコードを試す
+```Bash
+# 例: tanakaさんのコードを動かす
+git checkout tanaka
+git pull
+make
+./prep_group1 test/db_1
+```
+### 自分の作業に戻る時
+```Bash
+git checkout [自分の名前]
+```
 
 ## 参考文献
 - [Gitでのチーム開発の流れ](https://zenn.dev/taku_sid/articles/20250409_github_team)
