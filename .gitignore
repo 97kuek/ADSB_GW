@@ -1,29 +1,17 @@
-# --- 1. ビルド生成物 (無視) ---
 *.o
 *.obj
 a.out
 *.bin
 index.bin
-
-# 実行ファイルを無視
+result.txt
 prep_group*
 search_group*
-
-# 【重要】ソースコード(.c)は絶対に無視しない！
 !*.c
-
-# --- 2. データ領域 (無視) ---
 test/
-
-# ルートに置かれた巨大ファイルも無視
 database.txt
 query.txt
-
-# --- 3. 配布資料など (無視) ---
 doc/
 bin/
-
-# --- 4. システムファイル (無視) ---
 .vscode/
 .DS_Store
 Thumbs.db

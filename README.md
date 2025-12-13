@@ -34,34 +34,6 @@
     └── ○○.pdf          # 配布資料など
 ```
 
-## ビルドと実行方法
-### 1. ビルド
-ルートディレクトリで make コマンドを実行すると、索引構築用(prep_group1)と検索用(search_group1)の実行ファイルが生成されます。
-
-```bash
-make
-```
-※ make がない場合は以下のコマンドでコンパイルしてください 。
-
-```bash
-gcc -O3 -o prep_group1 src/prep_group1.c
-gcc -O3 -o search_group1 src/search_group1.c
-```
-### 2. 索引の構築
-```bash
-./prep_group1
-```
-
-### 3. 検索の実行
-```bash
-./search_group1
-```
-
-## 制約事項
-- メモリ制限: 使用メモリの上限は 5GB です。
-- 構築時間: 索引構築 (prep) に使える時間は最大 4分 です。
-- 検索時間: 検索処理 (search) に使える時間は最大 1分 です。
-
 ## Gitの使用方法
 ### 開発を始めるとき(最初だけ)
 ```Bash
