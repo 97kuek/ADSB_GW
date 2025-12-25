@@ -7,8 +7,8 @@ prep_1
 search_1
 index_1
 result_1
-prep_group*
-search_group*
+prep_1
+search_1
 !*.c
 test/
 database.txt
