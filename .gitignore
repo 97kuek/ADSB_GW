@@ -3,7 +3,10 @@
 a.out
 *.bin
 index.bin
-result.txt
+prep_1
+search_1
+index_1
+result_1
 prep_group*
 search_group*
 !*.c
