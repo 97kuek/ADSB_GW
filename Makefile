@@ -1,13 +1,17 @@
-CC       = gcc
-CFLAGS   = -O2
+CC      = gcc
+CFLAGS  = -O2
+LIBS    = -lm
 
-LIBS     = -lm
+# グループ番号
+GRP_ID  = 1
 
-TARGET_PREP   = prep_group1
-TARGET_SEARCH = search_group1
+# 実行ファイル名 (prep_1, search_1)
+TARGET_PREP   = prep_$(GRP_ID)
+TARGET_SEARCH = search_$(GRP_ID)
 
-SRC_PREP   = src/prep_group1.c
-SRC_SEARCH = src/search_group1.c
+# ソースファイル名 (src/prep_1.c, src/search_1.c)
+SRC_PREP   = src/prep_$(GRP_ID).c
+SRC_SEARCH = src/search_$(GRP_ID).c
 
 all: $(TARGET_PREP) $(TARGET_SEARCH)
 
@@ -17,7 +21,12 @@ $(TARGET_PREP): $(SRC_PREP)
 $(TARGET_SEARCH): $(SRC_SEARCH)
 	$(CC) $(CFLAGS) -o $(TARGET_SEARCH) $(SRC_SEARCH) $(LIBS)
 
-clean:
-	rm -f $(TARGET_PREP) $(TARGET_SEARCH) *.o
+# テスト実行
+test: all
+	./$(TARGET_PREP) db_data > index_$(GRP_ID)
+	./$(TARGET_SEARCH) query_data index_$(GRP_ID) > result_$(GRP_ID)
 
-.PHONY: all clean
+clean:
+	rm -f $(TARGET_PREP) $(TARGET_SEARCH) index_* result_*
+
+.PHONY: all clean test
