@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
                     goto NEXT_QUERY;
                 }
 
-                [cite_start]// Myers（挿入・削除を含む厳密な編集距離計算）[cite: 33, 34]
+                // Myers（挿入・削除を含む厳密な編集距離計算）
                 if (myers_distance(entry->str, &pdata) <= THRESHOLD) {
                     found = 1;
                     goto NEXT_QUERY;
@@ -188,7 +188,7 @@ int main(int argc, char *argv[]) {
             }
         }
         NEXT_QUERY:
-        fast_put(found ? '1' : '0'); [cite_start]// 結果をバッファへ [cite: 32]
+        fast_put(found ? '1' : '0'); // 結果をバッファへ
     }
     
     fast_put('\n'); 
