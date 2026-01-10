@@ -3,7 +3,7 @@
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
-        printf("Usage: %s <ground_truth (e.g., ../test/res_1)> <my_output.txt>\n", argv[0]);
+        printf("Usage: %s <ground_truth.txt> <my_output.txt>\n", argv[0]);
         return 1;
     }
 
@@ -25,22 +25,12 @@ int main(int argc, char *argv[]) {
             c_gt = fgetc(f_gt);
         } while (c_gt == '\n' || c_gt == '\r');
 
-        // 自分の出力から1文字読む（改行は無視しない -> 無視するように変更）
-        do {
-            c_my = fgetc(f_my);
-        } while (c_my == '\n' || c_my == '\r');
+        // 自分の出力から1文字読む（改行は無視しない）
+        c_my = fgetc(f_my);
 
         // 両方終端に達したら終了
-        if (c_gt == EOF && c_my == EOF) {
-            break;
-        }
-        
-        // 片方だけ終わっている場合はエラー警告
         if (c_gt == EOF || c_my == EOF) {
-             printf("Warning: File length mismatch!\n");
-             if (c_gt == EOF) printf("Ground truth ended earlier than user output.\n");
-             else             printf("User output ended earlier than ground truth.\n");
-             break;
+            break;
         }
 
         // 比較

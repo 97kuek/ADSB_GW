@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
     // Timing output to stderr (comment out for final)
     clock_t end_time = clock();
     double time_spent = (double)(end_time - start_time) / CLOCKS_PER_SEC;
-    // fprintf(stderr, "Exec Time: %.6f sec\n", time_spent);
+    fprintf(stderr, "Exec Time: %.6f sec\n", time_spent);
     return 0;
 }
 
