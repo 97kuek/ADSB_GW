@@ -1,35 +1,18 @@
-// 中間計測(prep_1.c)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #define LINE_LEN 16
-#define MAX_BUCKETS 10000 // 各パーツ(4文字分)が取り得る値の最大数 (10^4)
+#define MAX_BUCKETS 10000 
 
-// 合計15文字を {4, 4, 4, 3} の長さに分ける
 const int PART_OFFSET[4] = {0, 4, 8, 12};
 const int PART_LEN[4]    = {4, 4, 4, 3};
 
-// 検索時のさらなる高速化のため、インデックスには生の文字列だけでなく文字の出現頻度を計算して同梱する
-// これにより、Myersアルゴリズムを実行する前に、文字の過不足だけで編集距離3を超えるものをフィルタリングする
-typedef struct {
-    uint64_t hist; // 各文字(A-J)のカウントを4bitずつ格納したパックデータ
-    char str[16];  // 元の文字列データ
-} DataEntry;
+// Columnar Histogram logic:
+// We don't pack hist here. We just extract counts.
 
-// ハミング距離や編集距離の枝刈りに使うヒストグラムを生成
-// Aなら0-3bit、Bなら4-7bit...というように、10種類の文字の出現数を64bit整数の中にパッキングします
-uint64_t make_hist(const char* str) {
-    uint64_t h = 0;
-    for(int i=0; i<15; i++) {
-        int shift = (str[i] - 'A') * 4;
-        h += (1ULL << shift);
-    }
-    return h;
-}
-
-// 文字列の特定のパーツ（A-Jの並び）を 0〜9999 の数値に変換
 uint16_t encode_part(const char* str, int offset, int len) {
     uint16_t val = 0;
     for (int i = 0; i < len; i++) {
@@ -38,15 +21,15 @@ uint16_t encode_part(const char* str, int offset, int len) {
     return val;
 }
 
-// ファイル全体をメモリに一括読み込み
 char* read_all(const char* fname, size_t* size) {
     FILE* fp = fopen(fname, "rb");
-    if(!fp) exit(1);
+    if(!fp) { perror("fopen"); exit(1); }
     fseek(fp, 0, SEEK_END);
     *size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
     char* data = malloc(*size);
-    if (fread(data, 1, *size, fp) != *size) exit(1);
+    if (!data) { perror("malloc"); exit(1); }
+    if (fread(data, 1, *size, fp) != *size) { perror("fread"); exit(1); }
     fclose(fp);
     return data;
 }
@@ -58,53 +41,86 @@ int main(int argc, char* argv[]) {
     char* db_data = read_all(argv[1], &db_size);
     int num_lines = db_size / LINE_LEN;
 
-    // 索引の先頭にデータ件数を記録
     fwrite(&num_lines, sizeof(int), 1, stdout);
 
     static int counts[MAX_BUCKETS];
     static int offsets[MAX_BUCKETS];
     
-    DataEntry* sorted_data = malloc(sizeof(DataEntry) * num_lines);
-
-    // 4つのパーツそれぞれについてインデックスを作成するループ。
-    // 各ループでは「計数ソート（Counting Sort）」の要領でデータを並べ替えます。
     for (int p = 0; p < 4; p++) {
-        // 各バケット（特定の文字列パーツ）に何件のデータがあるか数える
+        int start_s = (p == 0) ? 0 : -1;
+        int end_s   = (p == 3) ? 0 : 1;
+
         memset(counts, 0, sizeof(counts));
+        int entries_count = 0;
+        
         for (int i = 0; i < num_lines; i++) {
             const char* str = db_data + i * LINE_LEN;
-            uint16_t key = encode_part(str, PART_OFFSET[p], PART_LEN[p]);
-            counts[key]++;
+            for (int s = start_s; s <= end_s; s++) {
+                uint16_t key = encode_part(str, PART_OFFSET[p] + s, PART_LEN[p]);
+                counts[key]++;
+                entries_count++;
+            }
         }
 
-        // 各バケットの開始位置を計算
         int current_idx = 0;
         for (int k = 0; k < MAX_BUCKETS; k++) {
             offsets[k] = current_idx;
             current_idx += counts[k];
         }
 
-        // オフセット情報を書き出し（検索時はこれを見て特定のバケットにジャンプする）
         fwrite(offsets, sizeof(int), MAX_BUCKETS, stdout);
-        int total_count = num_lines; 
-        fwrite(&total_count, sizeof(int), 1, stdout); 
+        fwrite(&entries_count, sizeof(int), 1, stdout); 
 
-        // データを実際にバケット順に並べ替えながら、追加情報を付与
+        char** sorted_ptrs = malloc(sizeof(char*) * entries_count);
+
         for (int i = 0; i < num_lines; i++) {
             const char* str = db_data + i * LINE_LEN;
-            uint16_t key = encode_part(str, PART_OFFSET[p], PART_LEN[p]);
-            int pos = offsets[key]++; // 書き込み位置を確定させてインクリメント
-            
-            // 検索時に役立つヒストグラムをあらかじめ計算して格納
-            sorted_data[pos].hist = make_hist(str);
-            memcpy(sorted_data[pos].str, str, LINE_LEN);
+            for (int s = start_s; s <= end_s; s++) {
+                uint16_t key = encode_part(str, PART_OFFSET[p] + s, PART_LEN[p]);
+                int pos = offsets[key]++; 
+                sorted_ptrs[pos] = (char*)str;
+            }
         }
         
-        // ソート済みデータエントリを書き出し
-        fwrite(sorted_data, sizeof(DataEntry), num_lines, stdout);
+        // COLUMNAR WRITEOUT
+        // Write 10 streams of uint8_t
+        // Stream 0: A counts for all entries
+        // Stream 1: B counts...
+        #define W_BUF_SZ 65536
+        uint8_t* val_buf = malloc(W_BUF_SZ);
+        
+        for(int char_idx=0; char_idx<10; char_idx++) {
+            for(int k=0; k<entries_count; k+=W_BUF_SZ) {
+                int block = (k + W_BUF_SZ <= entries_count) ? W_BUF_SZ : (entries_count - k);
+                for(int j=0; j<block; j++) {
+                    // Count specific char in str
+                    const char* s = sorted_ptrs[k+j];
+                    int c = 0;
+                    // Unroll this count manual optimization?
+                    // "For i in 0..14 if s[i] == char_idx + 'A' c++"
+                    char target = (char)('A' + char_idx);
+                    for(int x=0; x<15; x++) if(s[x] == target) c++;
+                    val_buf[j] = (uint8_t)c;
+                }
+                fwrite(val_buf, 1, block, stdout);
+            }
+        }
+        free(val_buf);
+
+        // Then strings
+        char* s_w_buf = malloc(LINE_LEN * W_BUF_SZ);
+        for(int k=0; k<entries_count; k+=W_BUF_SZ) {
+            int block = (k + W_BUF_SZ <= entries_count) ? W_BUF_SZ : (entries_count - k);
+            for(int j=0; j<block; j++) {
+                memcpy(&s_w_buf[j*LINE_LEN], sorted_ptrs[k+j], LINE_LEN);
+            }
+            fwrite(s_w_buf, LINE_LEN, block, stdout);
+        }
+        free(s_w_buf);
+
+        free(sorted_ptrs);
     }
 
-    free(sorted_data);
     free(db_data);
     return 0;
 }

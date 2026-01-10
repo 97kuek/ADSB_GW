@@ -1,21 +1,29 @@
+# Object files
 *.o
 *.obj
+
+# Executables
 a.out
 *.bin
-index.bin
 prep_1
 search_1
-index_1
-result_1
-prep_1
-search_1
+calc
 !*.c
+
+# Data files (Exclude large datasets)
+*.txt
+*.dat
+index_*
+result_*
+index.bin
+
+# Directories
 test/
-database.txt
-query.txt
 doc/
 bin/
 .vscode/
+
+# System
 .DS_Store
 Thumbs.db
 *.swp

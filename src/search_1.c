@@ -1,4 +1,4 @@
-// 中間計測(search_1.c)
+// search_1_v8.c (Optimization: Columnar SoA + AVX2 32-way Filter)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +9,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <immintrin.h>
+
+#pragma GCC target("avx2,popcnt")
 
 #define STR_LEN 15
 #define LINE_LEN 16
@@ -17,18 +20,16 @@
 
 typedef struct { uint64_t P_eq[10]; } PatternData;
 
-// Myersのビット並列アルゴリズム
-// 編集距離のCPテーブルの差分をビット列で管理し、1クロックで複数のセルを計算
-// 15文字固定であることを利用し、ループ展開によって分岐を排除
-static inline int myers_distance(const char* text, PatternData* pdata) {
+// Forward declaration
+static inline void check_candidate(int k, char* s_ptr, uint64_t q1, uint64_t q2, const PatternData* pdata, int* found);
+
+// Myers
+static inline int myers_distance(const char* text, const PatternData* pdata) {
     uint64_t VP = ~0ULL, VN = 0ULL;
     int score = STR_LEN;
     uint64_t PM, D0, HP, HN;
-    int char_idx;
-
     #define STEP(i) \
-        char_idx = text[i] - 'A'; \
-        PM = (char_idx >= 0 && char_idx < 10) ? pdata->P_eq[char_idx] : 0; \
+        PM = pdata->P_eq[text[i] - 'A']; \
         D0 = (((PM & VP) + VP) ^ VP) | PM | VN; \
         HP = VN | ~(D0 | VP); \
         HN = VP & D0; \
@@ -36,71 +37,41 @@ static inline int myers_distance(const char* text, PatternData* pdata) {
         score -= (HN >> 14) & 1; \
         HP = (HP << 1) | 1ULL; HN = (HN << 1); \
         VP = HN | ~(D0 | HP); VN = HP & D0;
-
     STEP(0); STEP(1); STEP(2); STEP(3); STEP(4);
     STEP(5); STEP(6); STEP(7); STEP(8); STEP(9);
     STEP(10); STEP(11); STEP(12); STEP(13); STEP(14);
     return score;
 }
 
-// クエリをP_eqに変換する
-// Myersアルゴリズムの事前準備
 void precompute_pattern(const char* pattern, PatternData* pdata) {
     for (int i = 0; i < 10; i++) pdata->P_eq[i] = 0;
     for (int i = 0; i < STR_LEN; i++) {
-        int char_idx = pattern[i] - 'A';
-        if (char_idx >= 0 && char_idx < 10) pdata->P_eq[char_idx] |= (1ULL << i);
+        pdata->P_eq[pattern[i] - 'A'] |= (1ULL << i);
     }
 }
 
 const int PART_OFFSET[4] = {0, 4, 8, 12};
 const int PART_LEN[4]    = {4, 4, 4, 3};
 
-// 分割された文字列を数値キーに変換し、インデックスのバケットを特定する
-uint16_t encode_part(const char* str, int offset, int len) {
+static inline uint16_t encode_part(const char* str, int offset, int len) {
     uint16_t val = 0;
     for (int i = 0; i < len; i++) val = val * 10 + (str[offset + i] - 'A');
     return val;
 }
 
-// クエリ文字列の文字出現頻度を計算
-uint64_t make_hist(const char* str) {
-    uint64_t h = 0;
-    for(int i=0; i<15; i++) h += (1ULL << ((str[i] - 'A') * 4));
-    return h;
+char* read_all(const char* filename, size_t* size) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) { perror("fopen"); exit(1); }
+    fseek(fp, 0, SEEK_END);
+    *size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    char* data = malloc(*size);
+    if (!data) { perror("malloc"); exit(1); }
+    if (fread(data, 1, *size, fp) != *size) { perror("fread"); exit(1); }
+    fclose(fp);
+    return data;
 }
 
-//ヒストグラム距離フィルタ
-//編集距離がK以下なら、文字カウントの差の合計は2K以下になる性質を利用
-//K=3 のため、差が6を超えれば編集距離3以内になることはない
-static inline int hist_diff(uint64_t h1, uint64_t h2) {
-    int diff = 0;
-    #define H_STEP(k) \
-        diff += abs((int)((h1 >> (k*4)) & 0xF) - (int)((h2 >> (k*4)) & 0xF));
-    
-    H_STEP(0); H_STEP(1); H_STEP(2); H_STEP(3); H_STEP(4);
-    H_STEP(5); H_STEP(6); H_STEP(7); H_STEP(8); H_STEP(9);
-    return diff;
-}
-
-// mmapを使用してファイルをメモリ空間に直接マッピング
-char* map_file(const char* filename, size_t* size) {
-    int fd = open(filename, O_RDONLY);
-    if (fd == -1) { perror("open"); exit(1); }
-    struct stat sb;
-    if (fstat(fd, &sb) == -1) { perror("fstat"); exit(1); }
-    *size = sb.st_size;
-    char* addr = mmap(NULL, *size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    return addr;
-}
-
-typedef struct {
-    uint64_t hist;
-    char str[16];
-} DataEntry;
-
-//出力
 #define OUT_BUF_SIZE 65536
 char out_buffer[OUT_BUF_SIZE];
 int out_buf_pos = 0;
@@ -122,81 +93,170 @@ int main(int argc, char *argv[]) {
     if (argc != 3) return 1;
 
     size_t q_sz, idx_sz;
-    char* q_data = map_file(argv[1], &q_sz);
-    char* idx_ptr = map_file(argv[2], &idx_sz);
+    char* q_data = read_all(argv[1], &q_sz);
+    char* idx_ptr = read_all(argv[2], &idx_sz);
 
-    int num_lines = *(int*)idx_ptr;
     char* current_ptr = idx_ptr + sizeof(int);
     
     int* offsets[4];
-    DataEntry* data_lists[4];
+    uint8_t* streams[4][10]; // 10 chars per part
+    char* str_lists[4];
     
-    // インデックスファイルをメモリ上のポインタとして再構築
     for(int p=0; p<4; p++) {
         offsets[p] = (int*)current_ptr;
-        current_ptr += sizeof(int) * (MAX_BUCKETS + 1);
-        data_lists[p] = (DataEntry*)current_ptr;
-        current_ptr += sizeof(DataEntry) * num_lines;
+        current_ptr += sizeof(int) * MAX_BUCKETS;
+        
+        int count = *(int*)current_ptr;
+        current_ptr += sizeof(int);
+        
+        for(int c=0; c<10; c++) {
+            streams[p][c] = (uint8_t*)current_ptr;
+            current_ptr += count; // 1 byte per entry
+        }
+        
+        str_lists[p] = (char*)current_ptr;
+        current_ptr += LINE_LEN * count;
     }
 
     int q_count = q_sz / LINE_LEN;
+    
+    __m256i thresh = _mm256_set1_epi8(6); 
+    // Wait, accumulation can exceed 255? 
+    // Max diff for one char is 15. Total diff <= 150. Matches fit in uint8.
+    // So we can use simple add_epi8. Even if it wraps (unlikely <= 6 check),
+    // Wait, if total > 255 it wraps. 
+    // SAD can be large. Max diff is 15 * 10 = 150. Safe for uint8.
 
-    // クエリごとにループ
     for (int i = 0; i < q_count; i++) {
         const char* q_str = q_data + i * LINE_LEN;
         PatternData pdata;
         precompute_pattern(q_str, &pdata);
-        uint64_t q_hist = make_hist(q_str);
         
-        // 文字列を64bit整数として一気にロード（ハミング距離計算用）
+        uint8_t q_cnts[10];
+        memset(q_cnts, 0, 10);
+        for(int x=0; x<15; x++) q_cnts[q_str[x] - 'A']++;
+        
+        // Prepare broadcasted vectors for query counts
+        __m256i q_vecs[10];
+        for(int x=0; x<10; x++) q_vecs[x] = _mm256_set1_epi8(q_cnts[x]);
+
         uint64_t q_u64_1 = *(uint64_t*)q_str;
         uint64_t q_u64_2 = *(uint64_t*)(q_str + 8);
 
         int found = 0;
 
-        //鳩の巣原理による探索
         for (int p = 0; p < 4; p++) {
             uint16_t key = encode_part(q_str, PART_OFFSET[p], PART_LEN[p]);
             int start = offsets[p][key];
             int end   = offsets[p][key + 1];
 
-            // 同じパーツを持つ候補データを順次チェック
-            for (int k = start; k < end; k++) {
-                DataEntry* entry = &data_lists[p][k];
-                
-                //ヒストグラムチェック（超高速排除）
-                if (hist_diff(q_hist, entry->hist) > 6) continue;
+            char* s_ptr = str_lists[p];
+            uint8_t* st[10];
+            for(int x=0; x<10; x++) st[x] = streams[p][x];
 
-                //ハミング距離（置換のみの判定）
-                uint64_t* db_u64 = (uint64_t*)entry->str;
-                uint64_t diff1 = q_u64_1 ^ db_u64[0];
-                uint64_t diff2 = q_u64_2 ^ db_u64[1];
+            int k = start;
+            int end_32 = end - 31;
+            
+            for (; k < end_32; k += 32) {
+                // Initialize total diff to 0
+                __m256i total = _mm256_setzero_si256();
                 
-                //ビット差異のカウント。3bit以下なら確実に編集距離3以内
-                int hamming = __builtin_popcountll(diff1) + __builtin_popcountll(diff2 & 0x00FFFFFFFFFFFFFFULL);
+                // Unroll loop for 10 chars? Compiler usually does ok, but manual is finer.
+                // We use PSADBW equivalent? No, we have individual bytes.
+                // We need ABS(a - b). avx2 doesn't have pabs_epi8 diff instruction directly for subtraction.
+                // Use _mm256_subs_epu8 (saturation) logic: (a-b) | (b-a)? Or (a-b) + (b-a)
+                // subs_epu8 handles unsigned saturation (0 if a<b).
+                // So abs(a-b) = subs(a,b) + subs(b,a).
                 
-                if (hamming <= 3) {
-                    found = 1;
-                    goto NEXT_QUERY;
-                }
+                // Char 0
+                __m256i v0 = _mm256_loadu_si256((__m256i const*)&st[0][k]);
+                total = _mm256_add_epi8(total, _mm256_or_si256(_mm256_subs_epu8(v0, q_vecs[0]), _mm256_subs_epu8(q_vecs[0], v0)));
+                
+                // Char 1
+                __m256i v1 = _mm256_loadu_si256((__m256i const*)&st[1][k]);
+                total = _mm256_add_epi8(total, _mm256_or_si256(_mm256_subs_epu8(v1, q_vecs[1]), _mm256_subs_epu8(q_vecs[1], v1)));
 
-                // Myers（挿入・削除を含む厳密な編集距離計算）
-                if (myers_distance(entry->str, &pdata) <= THRESHOLD) {
-                    found = 1;
-                    goto NEXT_QUERY;
+                // ... Char 2-9
+                #define ACC(id) \
+                    { \
+                       __m256i v = _mm256_loadu_si256((__m256i const*)&st[id][k]); \
+                       total = _mm256_add_epi8(total, _mm256_or_si256(_mm256_subs_epu8(v, q_vecs[id]), _mm256_subs_epu8(q_vecs[id], v))); \
+                    }
+                
+                ACC(2); ACC(3); ACC(4); ACC(5); ACC(6); ACC(7); ACC(8); ACC(9);
+                
+                // Check <= 6. We use PCMPGT again?
+                // total is epi8. thresh is epi8(6).
+                // We want !(total > 6)
+                // However, unsigned compare for epu8 is not directly available in AVX2 (only min/max/subs).
+                // Actually _mm256_cmpgt_epi8 is SIGNED.
+                // But our max value is 150 which fits in pos signed char (0-127)? No, 150 overflows signed char!
+                // Wait. 150 is -106 in int8.
+                // So checking > 6 with signed compare is risky if values > 127.
+                // Solution: use _mm256_max_epu8(total, thresh) == thresh?
+                // If total <= 6, max(total, 6) is 6. If total > 6, max is total.
+                // So check if max(total, 6) == 6.
+                
+                __m256i vmax = _mm256_max_epu8(total, thresh);
+                __m256i vcmp = _mm256_cmpeq_epi8(vmax, thresh); // 0xFF where total <= 6
+                
+                int mask = _mm256_movemask_epi8(vcmp);
+                
+                if (mask != 0) {
+                    // Iterate set bits
+                    // Since bits correspond to byte lanes 0-31
+                   // If mask has bit set, check candidate.
+                   // Optimize: `__builtin_ctz` to skip zeros
+                   while(mask) {
+                       int idx = __builtin_ctz(mask);
+                       check_candidate(k + idx, s_ptr, q_u64_1, q_u64_2, &pdata, &found);
+                       if(found) goto NEXT_QUERY; // Found
+                       mask &= ~(1 << idx);
+                   }
                 }
+            }
+
+            for (; k < end; k++) {
+                 // Scalar tail fallback
+                 int diff = 0;
+                 for(int c=0; c<10; c++) {
+                     int val = st[c][k];
+                     diff += abs(val - q_cnts[c]);
+                 }
+                 if (diff <= 6) {
+                     check_candidate(k, s_ptr, q_u64_1, q_u64_2, &pdata, &found);
+                     if(found) goto NEXT_QUERY;
+                 }
             }
         }
         NEXT_QUERY:
-        fast_put(found ? '1' : '0'); // 結果をバッファへ
+        fast_put(found ? '1' : '0');
     }
     
     fast_put('\n'); 
     flush_out();
     
-    // 実行時間を標準エラー出力に表示（リダイレクトを汚さないため）
+    // Timing output to stderr (comment out for final)
     clock_t end_time = clock();
     double time_spent = (double)(end_time - start_time) / CLOCKS_PER_SEC;
-    fprintf(stderr, "Exec Time: %.6f sec\n", time_spent);
+    // fprintf(stderr, "Exec Time: %.6f sec\n", time_spent);
     return 0;
+}
+
+static inline void check_candidate(int k, char* s_ptr, uint64_t q1, uint64_t q2, const PatternData* pdata, int* found) {
+    const char* entry_str = &s_ptr[k * LINE_LEN];
+    uint64_t* db_u64 = (uint64_t*)entry_str;
+    
+    uint64_t x1 = q1 ^ db_u64[0];
+    uint64_t x2 = q2 ^ db_u64[1];
+    int hamming = __builtin_popcountll(x1) + __builtin_popcountll(x2 & 0x00FFFFFFFFFFFFFFULL);
+    
+    if (hamming <= 3) {
+        *found = 1;
+        return;
+    }
+    if (myers_distance(entry_str, pdata) <= THRESHOLD) {
+        *found = 1;
+        return;
+    }
 }
