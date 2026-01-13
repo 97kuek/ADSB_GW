@@ -1,21 +1,26 @@
+# Build Artifacts
 *.o
 *.obj
 a.out
 *.bin
-index.bin
-prep_1
-search_1
-index_1
-result_1
-prep_1
-search_1
-!*.c
-test/
+
+# Executables
+prep_*
+search_*
+
+# Data and Results
+index_*
+result_*
 database.txt
 query.txt
+
+# Directories
+test/
 doc/
 bin/
 .vscode/
+
+# OS/Editor
 .DS_Store
 Thumbs.db
 *.swp
