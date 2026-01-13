@@ -1,4 +1,4 @@
-// 中間計測(search_1.c)
+// search_1.c 最終版
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +18,7 @@
 typedef struct { uint64_t P_eq[10]; } PatternData;
 
 // Myersのビット並列アルゴリズム
-// 編集距離のCPテーブルの差分をビット列で管理し、1クロックで複数のセルを計算
-// 15文字固定であることを利用し、ループ展開によって分岐を排除
+// 編集距離のCPテーブルの差分をビット列で管理
 static inline int myers_distance(const char* text, PatternData* pdata) {
     uint64_t VP = ~0ULL, VN = 0ULL;
     int score = STR_LEN;
@@ -43,8 +42,6 @@ static inline int myers_distance(const char* text, PatternData* pdata) {
     return score;
 }
 
-// クエリをP_eqに変換する
-// Myersアルゴリズムの事前準備
 void precompute_pattern(const char* pattern, PatternData* pdata) {
     for (int i = 0; i < 10; i++) pdata->P_eq[i] = 0;
     for (int i = 0; i < STR_LEN; i++) {
@@ -56,23 +53,18 @@ void precompute_pattern(const char* pattern, PatternData* pdata) {
 const int PART_OFFSET[4] = {0, 4, 8, 12};
 const int PART_LEN[4]    = {4, 4, 4, 3};
 
-// 分割された文字列を数値キーに変換し、インデックスのバケットを特定する
 uint16_t encode_part(const char* str, int offset, int len) {
     uint16_t val = 0;
     for (int i = 0; i < len; i++) val = val * 10 + (str[offset + i] - 'A');
     return val;
 }
 
-// クエリ文字列の文字出現頻度を計算
 uint64_t make_hist(const char* str) {
     uint64_t h = 0;
     for(int i=0; i<15; i++) h += (1ULL << ((str[i] - 'A') * 4));
     return h;
 }
 
-//ヒストグラム距離フィルタ
-//編集距離がK以下なら、文字カウントの差の合計は2K以下になる性質を利用
-//K=3 のため、差が6を超えれば編集距離3以内になることはない
 static inline int hist_diff(uint64_t h1, uint64_t h2) {
     int diff = 0;
     #define H_STEP(k) \
@@ -83,7 +75,6 @@ static inline int hist_diff(uint64_t h1, uint64_t h2) {
     return diff;
 }
 
-// mmapを使用してファイルをメモリ空間に直接マッピング
 char* map_file(const char* filename, size_t* size) {
     int fd = open(filename, O_RDONLY);
     if (fd == -1) { perror("open"); exit(1); }
@@ -100,7 +91,6 @@ typedef struct {
     char str[16];
 } DataEntry;
 
-//出力
 #define OUT_BUF_SIZE 65536
 char out_buffer[OUT_BUF_SIZE];
 int out_buf_pos = 0;
@@ -131,7 +121,6 @@ int main(int argc, char *argv[]) {
     int* offsets[4];
     DataEntry* data_lists[4];
     
-    // インデックスファイルをメモリ上のポインタとして再構築
     for(int p=0; p<4; p++) {
         offsets[p] = (int*)current_ptr;
         current_ptr += sizeof(int) * (MAX_BUCKETS + 1);
@@ -141,60 +130,60 @@ int main(int argc, char *argv[]) {
 
     int q_count = q_sz / LINE_LEN;
 
-    // クエリごとにループ
     for (int i = 0; i < q_count; i++) {
         const char* q_str = q_data + i * LINE_LEN;
         PatternData pdata;
         precompute_pattern(q_str, &pdata);
         uint64_t q_hist = make_hist(q_str);
         
-        // 文字列を64bit整数として一気にロード（ハミング距離計算用）
         uint64_t q_u64_1 = *(uint64_t*)q_str;
         uint64_t q_u64_2 = *(uint64_t*)(q_str + 8);
 
         int found = 0;
 
-        //鳩の巣原理による探索
+        // 鳩の巣原理：4分割のどこか1つがズレ(±1)含めて一致すればよい
         for (int p = 0; p < 4; p++) {
-            uint16_t key = encode_part(q_str, PART_OFFSET[p], PART_LEN[p]);
-            int start = offsets[p][key];
-            int end   = offsets[p][key + 1];
+            // スライド範囲の決定 (第1パーツは前方不可、第4パーツは後方不可)
+            int start_s = (p == 0) ? 0 : -1;
+            int end_s   = (p == 3) ? 0 : 1;
 
-            // 同じパーツを持つ候補データを順次チェック
-            for (int k = start; k < end; k++) {
-                DataEntry* entry = &data_lists[p][k];
-                
-                //ヒストグラムチェック（超高速排除）
-                if (hist_diff(q_hist, entry->hist) > 6) continue;
+            for (int s = start_s; s <= end_s; s++) {
+                uint16_t key = encode_part(q_str, PART_OFFSET[p] + s, PART_LEN[p]);
+                int start = offsets[p][key];
+                int end   = offsets[p][key + 1];
 
-                //ハミング距離（置換のみの判定）
-                uint64_t* db_u64 = (uint64_t*)entry->str;
-                uint64_t diff1 = q_u64_1 ^ db_u64[0];
-                uint64_t diff2 = q_u64_2 ^ db_u64[1];
-                
-                //ビット差異のカウント。3bit以下なら確実に編集距離3以内
-                int hamming = __builtin_popcountll(diff1) + __builtin_popcountll(diff2 & 0x00FFFFFFFFFFFFFFULL);
-                
-                if (hamming <= 3) {
-                    found = 1;
-                    goto NEXT_QUERY;
-                }
+                for (int k = start; k < end; k++) {
+                    DataEntry* entry = &data_lists[p][k];
+                    
+                    // 1. ヒストグラムフィルタ
+                    if (hist_diff(q_hist, entry->hist) > 6) continue;
 
-                // Myers（挿入・削除を含む厳密な編集距離計算）
-                if (myers_distance(entry->str, &pdata) <= THRESHOLD) {
-                    found = 1;
-                    goto NEXT_QUERY;
+                    // 2. ハミング距離 (置換のみ)
+                    uint64_t* db_u64 = (uint64_t*)entry->str;
+                    uint64_t diff1 = q_u64_1 ^ db_u64[0];
+                    uint64_t diff2 = q_u64_2 ^ db_u64[1];
+                    int hamming = __builtin_popcountll(diff1) + __builtin_popcountll(diff2 & 0x00FFFFFFFFFFFFFFULL);
+                    
+                    if (hamming <= 3) {
+                        found = 1;
+                        goto NEXT_QUERY;
+                    }
+
+                    // 3. Myers厳密計算 (挿入・削除対応)
+                    if (myers_distance(entry->str, &pdata) <= THRESHOLD) {
+                        found = 1;
+                        goto NEXT_QUERY;
+                    }
                 }
             }
         }
         NEXT_QUERY:
-        fast_put(found ? '1' : '0'); // 結果をバッファへ
+        fast_put(found ? '1' : '0');
     }
     
     fast_put('\n'); 
     flush_out();
     
-    // 実行時間を標準エラー出力に表示（リダイレクトを汚さないため）
     clock_t end_time = clock();
     double time_spent = (double)(end_time - start_time) / CLOCKS_PER_SEC;
     fprintf(stderr, "Exec Time: %.6f sec\n", time_spent);

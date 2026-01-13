@@ -1,4 +1,5 @@
-// 中間計測(prep_1.c)
+// prep_1.c(最終版)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
