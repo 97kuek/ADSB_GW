@@ -17,6 +17,7 @@
 
 typedef struct { uint64_t P_eq[10]; } PatternData;
 
+
 // Myersのビット並列アルゴリズム
 // 編集距離のCPテーブルの差分をビット列で管理
 static inline int myers_distance(const char* text, PatternData* pdata) {
@@ -139,6 +140,10 @@ int main(int argc, char *argv[]) {
         uint64_t q_u64_1 = *(uint64_t*)q_str;
         uint64_t q_u64_2 = *(uint64_t*)(q_str + 8);
 
+
+
+
+
         int found = 0;
 
         // 鳩の巣原理：4分割のどこか1つがズレ(±1)含めて一致すればよい
@@ -174,6 +179,8 @@ int main(int argc, char *argv[]) {
                         found = 1;
                         goto NEXT_QUERY;
                     }
+
+
                 }
             }
         }

@@ -5,18 +5,19 @@ a.out
 *.bin
 
 # Executables
-prep_*
-search_*
+/prep_*
+/search_*
 
 # Data and Results
 index_*
 result_*
+evaluation/results/
+
 database.txt
 query.txt
 
 # Directories
 test/
-doc/
 bin/
 .vscode/
 
